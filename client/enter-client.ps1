@@ -1,7 +1,7 @@
 # Remote Enter client for Windows. No installs needed - runs on built-in PowerShell.
 # Set $Server to your Coolify URL, then run start.bat.
 
-$Server = "https://your-app.example.com"
+$Server = "https://accept.krenarahmeti.com"
 
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
