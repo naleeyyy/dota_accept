@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote Enter</title>
+<style>
+  :root { color-scheme: light dark; --bg:#f6f6f4; --fg:#1a1a1a; --muted:#6b6b6b; --card:#fff; --border:#ddd; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --card:#1c1c1c; --border:#333; --accent:#3b82f6; } }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui, sans-serif; padding:16px; }
+  .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:24px; }
+  h1 { margin:0 0 16px; font-size:20px; }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  input { width:100%; padding:10px 12px; font:14px ui-monospace, monospace; border:1px solid var(--border); border-radius:8px; background:transparent; color:inherit; }
+  .status { margin:10px 0 20px; font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); }
+  .dot.on { background:var(--ok); } .dot.off { background:var(--bad); }
+  button { width:100%; padding:28px; font-size:22px; font-weight:600; border:0; border-radius:12px; background:var(--accent); color:#fff; cursor:pointer; }
+  button:active { transform:scale(.98); }
+  button:disabled { opacity:.5; cursor:default; }
+  .msg { margin-top:12px; min-height:1.4em; font-size:14px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Remote Enter</h1>
+  <label for="id">Client ID (shown in the Windows client window)</label>
+  <input id="id" autocomplete="off" spellcheck="false" placeholder="paste client ID">
+  <div class="status"><span class="dot" id="dot"></span><span id="statusText">Enter an ID</span></div>
+  <button id="press">Press Enter ⏎</button>
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const input = $("id");
+
+  function load(key) { try { return localStorage.getItem(key); } catch { return null; } }
+  function save(key, v) { try { localStorage.setItem(key, v); } catch {} }
+
+  // ID can come from the link the client prints (#id) or from last time.
+  const fromHash = location.hash.slice(1);
+  if (fromHash) { save("clientId", fromHash); history.replaceState(null, "", location.pathname); }
+  input.value = fromHash || load("clientId") || "";
+
+  function setStatus(state, text) {
+    $("dot").className = "dot " + (state || "");
+    $("statusText").textContent = text;
+  }
+
+  async function checkStatus() {
+    const id = input.value.trim();
+    if (!id) return setStatus("", "Enter an ID");
+    try {
+      const r = await fetch("/api/status?id=" + encodeURIComponent(id));
+      const j = await r.json();
+      if (!r.ok) return setStatus("off", j.error || "Error");
+      setStatus(j.online ? "on" : "off", j.online ? "Client online" : "Client offline");
+    } catch { setStatus("off", "Server unreachable"); }
+  }
+
+  input.addEventListener("input", () => { save("clientId", input.value.trim()); checkStatus(); });
+
+  $("press").addEventListener("click", async () => {
+    const btn = $("press"), msg = $("msg");
+    btn.disabled = true; msg.textContent = "";
+    try {
+      const r = await fetch("/api/press", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: input.value.trim() }),
+      });
+      const j = await r.json();
+      msg.textContent = r.ok ? "Sent ✓" : (j.error || "Failed");
+      msg.style.color = r.ok ? "var(--ok)" : "var(--bad)";
+    } catch { msg.textContent = "Server unreachable"; msg.style.color = "var(--bad)"; }
+    btn.disabled = false;
+    checkStatus();
+  });
+
+  checkStatus();
+  setInterval(checkStatus, 5000);
+</script>
+</body>
+</html>
