@@ -1,0 +1,6 @@
+{
+  "name": "remote-enter",
+  "private": true,
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "web-push": "^3.6.7" }
+}

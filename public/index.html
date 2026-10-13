@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Remote Enter</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2563eb">
 <style>
   :root { color-scheme: light dark; --bg:#f6f6f4; --fg:#1a1a1a; --muted:#6b6b6b; --card:#fff; --border:#ddd; --accent:#2563eb; --ok:#16a34a; --bad:#dc2626; }
   @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --card:#1c1c1c; --border:#333; --accent:#3b82f6; } }
@@ -16,10 +21,15 @@
   .status { margin:10px 0 20px; font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--muted); }
   .dot.on { background:var(--ok); } .dot.off { background:var(--bad); }
-  button { width:100%; padding:28px; font-size:22px; font-weight:600; border:0; border-radius:12px; background:var(--accent); color:#fff; cursor:pointer; }
-  button:active { transform:scale(.98); }
+  .ready { margin-bottom:12px; padding:12px; border-radius:10px; background:var(--ok); color:#fff; font-weight:600; text-align:center; animation:pulse 1s ease-in-out infinite alternate; }
+  @keyframes pulse { from { opacity:1; } to { opacity:.6; } }
+  button { width:100%; border:0; border-radius:12px; cursor:pointer; font:inherit; }
+  #press { padding:28px; font-size:22px; font-weight:600; background:var(--accent); color:#fff; }
+  #press:active { transform:scale(.98); }
   button:disabled { opacity:.5; cursor:default; }
   .msg { margin-top:12px; min-height:1.4em; font-size:14px; text-align:center; }
+  .notify { margin-top:20px; padding-top:16px; border-top:1px solid var(--border); font-size:13px; color:var(--muted); }
+  #notifyBtn { margin-top:8px; padding:10px; background:transparent; color:var(--fg); border:1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -28,8 +38,13 @@
   <label for="id">Client ID (shown in the Windows client window)</label>
   <input id="id" autocomplete="off" spellcheck="false" placeholder="paste client ID">
   <div class="status"><span class="dot" id="dot"></span><span id="statusText">Enter an ID</span></div>
+  <div class="ready" id="ready" hidden>Match ready!</div>
   <button id="press">Press Enter ⏎</button>
   <div class="msg" id="msg"></div>
+  <div class="notify">
+    <div id="notifyText">Get a notification when a match is found.</div>
+    <button id="notifyBtn">Enable notifications</button>
+  </div>
 </div>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -50,16 +65,22 @@
 
   async function checkStatus() {
     const id = input.value.trim();
+    $("ready").hidden = true;
     if (!id) return setStatus("", "Enter an ID");
     try {
       const r = await fetch("/api/status?id=" + encodeURIComponent(id));
       const j = await r.json();
       if (!r.ok) return setStatus("off", j.error || "Error");
       setStatus(j.online ? "on" : "off", j.online ? "Client online" : "Client offline");
+      $("ready").hidden = !j.ready;
     } catch { setStatus("off", "Server unreachable"); }
   }
 
-  input.addEventListener("input", () => { save("clientId", input.value.trim()); checkStatus(); });
+  input.addEventListener("input", () => {
+    save("clientId", input.value.trim());
+    checkStatus();
+    if (pushSupported && Notification.permission === "granted") subscribe().catch(() => {});
+  });
 
   $("press").addEventListener("click", async () => {
     const btn = $("press"), msg = $("msg");
@@ -77,6 +98,73 @@
     btn.disabled = false;
     checkStatus();
   });
+
+  // --- Push notifications ---
+
+  const pushSupported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
+
+  function b64ToBytes(b64) {
+    const s = atob((b64 + "=".repeat((4 - b64.length % 4) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(s, (c) => c.charCodeAt(0));
+  }
+
+  function sameKey(a, b) {
+    if (!a || a.byteLength !== b.byteLength) return false;
+    const x = new Uint8Array(a);
+    return x.every((v, i) => v === b[i]);
+  }
+
+  // Registers this browser for the current ID. Safe to call on every load:
+  // it re-sends the subscription so the server picks it up after a redeploy.
+  async function subscribe() {
+    const id = input.value.trim();
+    if (!id) throw new Error("Enter your client ID first");
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
+    const { publicKey } = await (await fetch("/api/vapid")).json();
+    const key = b64ToBytes(publicKey);
+    let sub = await reg.pushManager.getSubscription();
+    if (sub && !sameKey(sub.options.applicationServerKey, key)) { await sub.unsubscribe(); sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    const r = await fetch("/api/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, subscription: sub.toJSON() }),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || "Subscribe failed");
+  }
+
+  function renderNotify() {
+    const btn = $("notifyBtn"), text = $("notifyText");
+    if (isIOS && !standalone) {
+      text.textContent = "On iPhone: tap Share → Add to Home Screen, then open it from there to enable notifications.";
+      btn.hidden = true;
+    } else if (!pushSupported) {
+      text.textContent = "This browser doesn't support push notifications.";
+      btn.hidden = true;
+    } else if (Notification.permission === "granted") {
+      text.textContent = "Notifications are on for this device.";
+      btn.textContent = "Send again";
+    } else if (Notification.permission === "denied") {
+      text.textContent = "Notifications are blocked. Allow them in your browser's site settings.";
+      btn.hidden = true;
+    }
+  }
+
+  $("notifyBtn").addEventListener("click", async () => {
+    try {
+      if (await Notification.requestPermission() !== "granted") return renderNotify();
+      await subscribe();
+      $("notifyText").textContent = "Notifications are on for this device.";
+    } catch (e) {
+      $("notifyText").textContent = e.message;
+    }
+  });
+
+  renderNotify();
+  if (pushSupported && Notification.permission === "granted") subscribe().catch(() => {});
 
   checkStatus();
   setInterval(checkStatus, 5000);

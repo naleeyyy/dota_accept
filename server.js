@@ -1,21 +1,60 @@
 // Tiny relay: the Windows client long-polls /api/poll, the web page POSTs /api/press.
+// The client also POSTs /api/ready when it sees the Accept button, which sends a
+// web push to every browser subscribed with that client ID.
 // The client-generated ID is the only credential, so it must be long and random.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const webpush = require("web-push");
 
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const POLL_HOLD_MS = 20000; // how long a poll request is held open
 const ONLINE_WINDOW_MS = 35000; // client counts as online if it polled this recently
+const READY_WINDOW_MS = 30000; // page shows "match ready" for this long
+const MAX_SUBS_PER_ID = 10;
 const ID_RE = /^[a-f0-9]{32,64}$/;
 
-// id -> { waiter: res | null, pending: number, lastSeen: ms }
+// --- Persistent state: VAPID keys and push subscriptions ---
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const vapidFile = path.join(DATA_DIR, "vapid.json");
+const subsFile = path.join(DATA_DIR, "subs.json");
+
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+let vapid = readJson(vapidFile, null);
+if (!vapid) {
+  vapid = webpush.generateVAPIDKeys();
+  fs.writeFileSync(vapidFile, JSON.stringify(vapid));
+}
+webpush.setVapidDetails(
+  process.env.VAPID_SUBJECT || "mailto:noreply@example.com",
+  vapid.publicKey,
+  vapid.privateKey
+);
+
+// id -> [subscription, ...]
+const subs = new Map(Object.entries(readJson(subsFile, {})));
+function saveSubs() {
+  fs.writeFile(subsFile, JSON.stringify(Object.fromEntries(subs)), () => {});
+}
+
+// --- In-memory client state ---
+
+// id -> { waiter: res | null, pending: number, lastSeen: ms, readyAt: ms }
 const clients = new Map();
 
 function getClient(id) {
   let c = clients.get(id);
   if (!c) {
-    c = { waiter: null, pending: 0, lastSeen: 0 };
+    c = { waiter: null, pending: 0, lastSeen: 0, readyAt: 0 };
     clients.set(id, c);
   }
   return c;
@@ -35,7 +74,7 @@ function readBody(req) {
     let data = "";
     req.on("data", (chunk) => {
       data += chunk;
-      if (data.length > 1024) req.destroy();
+      if (data.length > 8192) req.destroy();
     });
     req.on("end", () => {
       try {
@@ -47,7 +86,12 @@ function readBody(req) {
   });
 }
 
-// Simple per-IP limiter for the press/status endpoints to slow down ID guessing.
+function cleanId(raw) {
+  const id = String(raw || "").trim().toLowerCase();
+  return ID_RE.test(id) ? id : null;
+}
+
+// Simple per-IP limiter for the web endpoints to slow down ID guessing.
 const hits = new Map();
 function rateLimited(req) {
   const ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket.remoteAddress;
@@ -62,14 +106,55 @@ function rateLimited(req) {
   return h.count > 120;
 }
 
-const indexHtml = fs.readFileSync(path.join(__dirname, "public", "index.html"));
+async function notifyReady(id) {
+  const list = subs.get(id) || [];
+  if (!list.length) return 0;
+  const payload = JSON.stringify({ title: "Match ready!", body: "Tap Accept to press Enter.", id });
+  const alive = [];
+  await Promise.all(
+    list.map((s) =>
+      webpush.sendNotification(s, payload, { TTL: 30, urgency: "high" }).then(
+        () => alive.push(s),
+        (err) => {
+          // 404/410 means the browser dropped the subscription.
+          if (err.statusCode !== 404 && err.statusCode !== 410) {
+            alive.push(s);
+            console.error("push failed:", err.statusCode, err.body);
+          }
+        }
+      )
+    )
+  );
+  if (alive.length !== list.length) {
+    if (alive.length) subs.set(id, alive);
+    else subs.delete(id);
+    saveSubs();
+  }
+  return alive.length;
+}
+
+// --- Static files ---
+
+const staticFiles = {
+  "/": ["index.html", "text/html; charset=utf-8"],
+  "/sw.js": ["sw.js", "text/javascript"],
+  "/manifest.json": ["manifest.json", "application/manifest+json"],
+  "/icon.svg": ["icon.svg", "image/svg+xml"],
+};
+const staticCache = {};
+for (const [route, [file, type]] of Object.entries(staticFiles)) {
+  staticCache[route] = { body: fs.readFileSync(path.join(__dirname, "public", file)), type };
+}
+
+// --- Routes ---
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
 
-  if (req.method === "GET" && url.pathname === "/") {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    return res.end(indexHtml);
+  if (req.method === "GET" && staticCache[url.pathname]) {
+    const f = staticCache[url.pathname];
+    res.writeHead(200, { "Content-Type": f.type, "Cache-Control": "no-cache" });
+    return res.end(f.body);
   }
 
   if (req.method === "GET" && url.pathname === "/healthz") {
@@ -78,8 +163,8 @@ const server = http.createServer(async (req, res) => {
 
   // Windows client: wait for presses.
   if (req.method === "GET" && url.pathname === "/api/poll") {
-    const id = (url.searchParams.get("id") || "").toLowerCase();
-    if (!ID_RE.test(id)) return json(res, 400, { error: "bad id" });
+    const id = cleanId(url.searchParams.get("id"));
+    if (!id) return json(res, 400, { error: "bad id" });
 
     const c = getClient(id);
     c.lastSeen = Date.now();
@@ -109,16 +194,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Windows client: the Accept button is on screen.
+  if (req.method === "POST" && url.pathname === "/api/ready") {
+    const id = cleanId((await readBody(req)).id);
+    if (!id) return json(res, 400, { error: "bad id" });
+    const c = getClient(id);
+    c.lastSeen = Date.now();
+    if (Date.now() - c.readyAt < 20000) return json(res, 200, { ok: true, sent: 0 });
+    c.readyAt = Date.now();
+    const sent = await notifyReady(id);
+    console.log(`ready: notified ${sent} browser(s)`);
+    return json(res, 200, { ok: true, sent });
+  }
+
   // Web page: press Enter.
   if (req.method === "POST" && url.pathname === "/api/press") {
     if (rateLimited(req)) return json(res, 429, { error: "slow down" });
-    const { id: rawId } = await readBody(req);
-    const id = String(rawId || "").trim().toLowerCase();
-    if (!ID_RE.test(id)) return json(res, 400, { error: "Invalid ID format" });
+    const id = cleanId((await readBody(req)).id);
+    if (!id) return json(res, 400, { error: "Invalid ID format" });
 
     const c = clients.get(id);
     if (!isOnline(c)) return json(res, 404, { error: "No client online with that ID" });
 
+    c.readyAt = 0;
     if (c.waiter) {
       const w = c.waiter;
       c.waiter = null;
@@ -131,12 +229,37 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
-  // Web page: is the client connected?
+  // Web page: is the client connected, and is a match waiting?
   if (req.method === "GET" && url.pathname === "/api/status") {
     if (rateLimited(req)) return json(res, 429, { error: "slow down" });
-    const id = (url.searchParams.get("id") || "").trim().toLowerCase();
-    if (!ID_RE.test(id)) return json(res, 400, { error: "Invalid ID format" });
-    return json(res, 200, { online: isOnline(clients.get(id)) });
+    const id = cleanId(url.searchParams.get("id"));
+    if (!id) return json(res, 400, { error: "Invalid ID format" });
+    const c = clients.get(id);
+    return json(res, 200, {
+      online: isOnline(c),
+      ready: !!c && Date.now() - c.readyAt < READY_WINDOW_MS,
+    });
+  }
+
+  // Web page: push setup.
+  if (req.method === "GET" && url.pathname === "/api/vapid") {
+    return json(res, 200, { publicKey: vapid.publicKey });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/subscribe") {
+    if (rateLimited(req)) return json(res, 429, { error: "slow down" });
+    const body = await readBody(req);
+    const id = cleanId(body.id);
+    const sub = body.subscription;
+    if (!id) return json(res, 400, { error: "Invalid ID format" });
+    if (!sub || typeof sub.endpoint !== "string" || !/^https:\/\//.test(sub.endpoint) || !sub.keys) {
+      return json(res, 400, { error: "bad subscription" });
+    }
+    const list = (subs.get(id) || []).filter((s) => s.endpoint !== sub.endpoint);
+    list.push({ endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } });
+    subs.set(id, list.slice(-MAX_SUBS_PER_ID));
+    saveSubs();
+    return json(res, 200, { ok: true });
   }
 
   res.writeHead(404);
