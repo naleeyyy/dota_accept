@@ -266,7 +266,8 @@ const server = http.createServer(async (req, res) => {
     if (!id) return json(res, 400, { error: "bad id" });
     const c = getClient(id);
     c.lastSeen = Date.now();
-    if (Date.now() - c.readyAt < 20000) return json(res, 200, { ok: true, sent: 0 });
+    // Only swallow near-instant duplicates; a new match can pop seconds after a declined one.
+    if (Date.now() - c.readyAt < 3000) return json(res, 200, { ok: true, sent: 0 });
     c.readyAt = Date.now();
     const sent = await notifyReady(id);
     console.log(`ready: notified ${sent} browser(s)`);

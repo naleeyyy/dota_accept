@@ -140,6 +140,7 @@ $connected = $false
 $f8WasDown = $false
 $nextCheckAt = [DateTime]::MinValue
 $readyShown = $false
+$goneChecks = 0
 
 while ($true) {
     $now = [DateTime]::Now
@@ -181,13 +182,17 @@ while ($true) {
             $bmp.Dispose()
             if ($ShowScores) { Log ("Match score: {0:N2}" -f $score) DarkGray }
 
+            if ($score -ge $Threshold) { $goneChecks = 0 } else { $goneChecks++ }
+
             if ($score -ge $Threshold -and -not $readyShown) {
                 $readyShown = $true
                 Log ("Match ready! (score {0:N2}) Notifying..." -f $score) Green
                 $body = New-Object System.Net.Http.StringContent("{`"id`":`"$Id`"}", [Text.Encoding]::UTF8, "application/json")
                 $http.PostAsync("$Server/api/ready", $body) | Out-Null
-            } elseif ($score -lt ($Threshold - 0.15)) {
+            } elseif ($readyShown -and $goneChecks -ge 2) {
+                # Button gone for 2s: the pop is over, so the next one notifies again.
                 $readyShown = $false
+                Log "Accept button gone"
             }
         } catch {
             # Screen can't be captured while Windows is locked; just try again.
