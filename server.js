@@ -141,13 +141,76 @@ const staticFiles = {
   "/manifest.json": ["manifest.json", "application/manifest+json"],
   "/icon.svg": ["icon.svg", "image/svg+xml"],
   "/setup": ["setup.html", "text/html; charset=utf-8"],
-  "/client.zip": ["client.zip", "application/zip"], // built by the Dockerfile
 };
 const staticCache = {};
 for (const [route, [file, type]] of Object.entries(staticFiles)) {
-  const p = path.join(__dirname, "public", file);
-  if (fs.existsSync(p)) staticCache[route] = { body: fs.readFileSync(p), type };
+  staticCache[route] = { body: fs.readFileSync(path.join(__dirname, "public", file)), type };
 }
+
+// Zip the Windows client at startup so the download always matches the repo,
+// whichever way the app was built.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+function makeZip(files) {
+  const zlib = require("zlib");
+  const local = [];
+  const central = [];
+  let offset = 0;
+  for (const { name, data } of files) {
+    const nameBuf = Buffer.from(name);
+    const packed = zlib.deflateRawSync(data);
+    const crc = crc32(data);
+    const head = Buffer.alloc(30);
+    head.writeUInt32LE(0x04034b50, 0);
+    head.writeUInt16LE(20, 4); // version needed
+    head.writeUInt16LE(8, 8); // deflate
+    head.writeUInt16LE(0x21, 12); // date: 1980-01-01
+    head.writeUInt32LE(crc, 14);
+    head.writeUInt32LE(packed.length, 18);
+    head.writeUInt32LE(data.length, 22);
+    head.writeUInt16LE(nameBuf.length, 26);
+    local.push(head, nameBuf, packed);
+
+    const dir = Buffer.alloc(46);
+    dir.writeUInt32LE(0x02014b50, 0);
+    dir.writeUInt16LE(20, 4); // version made by
+    dir.writeUInt16LE(20, 6); // version needed
+    dir.writeUInt16LE(8, 10);
+    dir.writeUInt16LE(0x21, 14);
+    dir.writeUInt32LE(crc, 16);
+    dir.writeUInt32LE(packed.length, 20);
+    dir.writeUInt32LE(data.length, 24);
+    dir.writeUInt16LE(nameBuf.length, 28);
+    dir.writeUInt32LE(offset, 42);
+    central.push(dir, nameBuf);
+    offset += head.length + nameBuf.length + packed.length;
+  }
+  const dirBuf = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(dirBuf.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...local, dirBuf, end]);
+}
+staticCache["/client.zip"] = {
+  type: "application/zip",
+  body: makeZip(
+    ["enter-client.ps1", "start.bat"].map((f) => ({
+      name: "client/" + f,
+      data: fs.readFileSync(path.join(__dirname, "client", f)),
+    }))
+  ),
+};
 
 // --- Routes ---
 
