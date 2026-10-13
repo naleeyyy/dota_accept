@@ -29,6 +29,7 @@
   button:disabled { opacity:.5; cursor:default; }
   .msg { margin-top:12px; min-height:1.4em; font-size:14px; text-align:center; }
   .notify { margin-top:20px; padding-top:16px; border-top:1px solid var(--border); font-size:13px; color:var(--muted); }
+  .setup { display:block; margin-top:16px; text-align:center; font-size:13px; color:var(--muted); }
   #notifyBtn { margin-top:8px; padding:10px; background:transparent; color:var(--fg); border:1px solid var(--border); }
 </style>
 </head>
@@ -45,6 +46,7 @@
     <div id="notifyText">Get a notification when a match is found.</div>
     <button id="notifyBtn">Enable notifications</button>
   </div>
+  <a class="setup" href="/setup">Setup guide &rarr;</a>
 </div>
 <script>
   const $ = (id) => document.getElementById(id);

@@ -140,10 +140,13 @@ const staticFiles = {
   "/sw.js": ["sw.js", "text/javascript"],
   "/manifest.json": ["manifest.json", "application/manifest+json"],
   "/icon.svg": ["icon.svg", "image/svg+xml"],
+  "/setup": ["setup.html", "text/html; charset=utf-8"],
+  "/client.zip": ["client.zip", "application/zip"], // built by the Dockerfile
 };
 const staticCache = {};
 for (const [route, [file, type]] of Object.entries(staticFiles)) {
-  staticCache[route] = { body: fs.readFileSync(path.join(__dirname, "public", file)), type };
+  const p = path.join(__dirname, "public", file);
+  if (fs.existsSync(p)) staticCache[route] = { body: fs.readFileSync(p), type };
 }
 
 // --- Routes ---

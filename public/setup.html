@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Setup - Remote Enter</title>
+<link rel="icon" href="/icon.svg">
+<style>
+  :root { color-scheme: light dark; --bg:#f6f6f4; --fg:#1a1a1a; --muted:#6b6b6b; --card:#fff; --border:#ddd; --accent:#2563eb; --code:#f0f0ee; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --muted:#999; --card:#1c1c1c; --border:#333; --accent:#3b82f6; --code:#262626; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui, sans-serif; padding:32px 16px 64px; }
+  main { max-width:640px; margin:0 auto; }
+  a { color:var(--accent); }
+  .back { font-size:14px; text-decoration:none; }
+  h1 { font-size:26px; margin:12px 0 4px; }
+  .lede { color:var(--muted); margin:0 0 28px; }
+  ol.steps { list-style:none; counter-reset:step; padding:0; margin:0; }
+  ol.steps > li { counter-increment:step; position:relative; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:18px 20px 18px 60px; margin-bottom:14px; }
+  ol.steps > li::before { content:counter(step); position:absolute; left:18px; top:17px; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-weight:600; font-size:14px; display:grid; place-items:center; }
+  h2 { font-size:17px; margin:0 0 6px; }
+  p, ul { margin:6px 0; }
+  ul { padding-left:20px; }
+  .note { font-size:14px; color:var(--muted); }
+  kbd, code { font:13px ui-monospace, monospace; background:var(--code); border:1px solid var(--border); border-radius:5px; padding:1px 5px; }
+  .btn { display:inline-block; margin:8px 0 4px; padding:10px 16px; border-radius:9px; background:var(--accent); color:#fff; font-weight:600; text-decoration:none; }
+  h3 { font-size:15px; margin:32px 0 10px; }
+  details { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 16px; margin-bottom:10px; }
+  summary { cursor:pointer; font-weight:500; }
+  details p { font-size:15px; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/">&larr; Back to Remote Enter</a>
+  <h1>Setup</h1>
+  <p class="lede">About 5 minutes. You need a Windows PC and a phone. Nothing to install.</p>
+
+  <ol class="steps">
+    <li>
+      <h2>Download the client on your PC</h2>
+      <a class="btn" href="/client.zip">Download client.zip</a>
+      <p>Right-click the zip, choose <b>Extract All</b>, and open the extracted <code>client</code> folder. Keep both files together:</p>
+      <ul>
+        <li><code>enter-client.ps1</code> is the client itself</li>
+        <li><code>start.bat</code> starts it</li>
+      </ul>
+    </li>
+
+    <li>
+      <h2>Start it</h2>
+      <p>Double-click <code>start.bat</code>. A window opens showing your <b>Client ID</b> and a link.</p>
+      <p class="note">If Windows SmartScreen warns you, click <b>More info</b> &rarr; <b>Run anyway</b>. Leave the window open while you play; minimizing it is fine.</p>
+    </li>
+
+    <li>
+      <h2>Connect your phone</h2>
+      <p>Open the link from the client window on your phone, or open this site and paste the Client ID into the box. The dot should turn green and say <b>Client online</b>.</p>
+      <p class="note">Your Client ID is your password. Anyone with it can press Enter on your PC, so don't share it. To change it, delete <code>client-id.txt</code> in the client folder and restart the client.</p>
+    </li>
+
+    <li>
+      <h2>Turn on notifications</h2>
+      <ul>
+        <li><b>Android / desktop:</b> tap <b>Enable notifications</b> on the main page and allow them.</li>
+        <li><b>iPhone:</b> first tap Share &rarr; <b>Add to Home Screen</b>, open Remote Enter from the home screen, then tap <b>Enable notifications</b>. iPhones only allow notifications from home-screen apps.</li>
+      </ul>
+    </li>
+
+    <li>
+      <h2>Teach it the Accept button</h2>
+      <p>You only do this once. The next time a match pops while you're at the PC:</p>
+      <ul>
+        <li>Hover your mouse over the <b>ACCEPT</b> button and press <kbd>F8</kbd>.</li>
+        <li>Move the mouse <b>off</b> the button within 2 seconds, so the saved picture doesn't include the hover highlight.</li>
+        <li>You'll hear a beep. Accept the match as normal.</li>
+      </ul>
+      <p class="note">The client saves <code>calibration.png</code> next to the script. Open it and check it shows the Accept button. The client only looks at that spot on your screen; it doesn't read any game files.</p>
+    </li>
+
+    <li>
+      <h2>Queue and walk away</h2>
+      <p>When a match is found you'll get a <b>Match ready!</b> notification.</p>
+      <ul>
+        <li><b>Android:</b> tap <b>Accept (press Enter)</b> right on the notification.</li>
+        <li><b>iPhone:</b> tap the notification, then the big <b>Press Enter</b> button.</li>
+      </ul>
+      <p class="note">Enter goes to whichever window is in front, so leave Dota focused.</p>
+    </li>
+  </ol>
+
+  <h3>Troubleshooting</h3>
+
+  <details>
+    <summary>Enter doesn't do anything in Dota</summary>
+    <p>Switch Dota to <b>borderless windowed</b> in the video settings; exclusive fullscreen can ignore simulated keys. If Dota runs as administrator, right-click <code>start.bat</code> and choose <b>Run as administrator</b> too.</p>
+  </details>
+
+  <details>
+    <summary>No notification when a match pops</summary>
+    <p>Dota must be visible on screen, not minimized. If you changed resolution, window size or monitor since setup, press <kbd>F8</kbd> on the button again.</p>
+    <p>Still nothing? Open <code>enter-client.ps1</code> in Notepad, set <code>$ShowScores = $true</code> and restart. It prints a score every second: it should be close to 1 while the Accept button is showing. If it peaks lower, reduce <code>$Threshold</code> (default 0.90) a little.</p>
+  </details>
+
+  <details>
+    <summary>Notification when there's no match</summary>
+    <p>Raise <code>$Threshold</code> in <code>enter-client.ps1</code> (for example to 0.95) and restart the client.</p>
+  </details>
+
+  <details>
+    <summary>"Client offline" on the page</summary>
+    <p>Make sure the client window is still open and says <b>Connected</b>, and that the ID on the page matches the one in the window.</p>
+  </details>
+
+  <details>
+    <summary>Start the client automatically with Windows</summary>
+    <p>Press <kbd>Win</kbd>+<kbd>R</kbd>, type <code>shell:startup</code>, and put a shortcut to <code>start.bat</code> in the folder that opens.</p>
+  </details>
+</main>
+</body>
+</html>

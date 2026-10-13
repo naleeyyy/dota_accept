@@ -4,3 +4,4 @@ client/calibration.png
 node_modules/
 data/
 .DS_Store
+public/client.zip
